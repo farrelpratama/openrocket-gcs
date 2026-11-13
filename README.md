@@ -75,20 +75,26 @@ Avionics firmware and ground software for our OpenRocket model rocket. The rocke
 openrocket-gcs/
 ├── README.md
 ├── brief.md                  # project brief, roles, timeline
-├── docs/                     # architecture, protocol, wiring, test plan
-├── shared/protocol/          # packets.h / packets.py — source of truth
-├── firmware/
-│   ├── rocket/               # PlatformIO — Rocket ESP32
-│   │   └── src/{sensors,comms,pyro,state,utils}/
-│   └── gcs_bridge/           # PlatformIO — GCS ESP32 (radio ↔ USB)
-├── gcs/
-│   ├── backend/              # serial reader, command sender, logger, WebSocket
-│   └── frontend/             # dashboard (HTML/JS/CSS)
-├── hardware/                 # bom.md, schematics, pcb notes
-├── data/{logs,samples}/
-├── tools/                    # fake_telemetry.py, plot_log.py
+├── .github/                  # CODEOWNERS, PR & issue templates
+├── shared/protocol/          # packets, commands, CSV schema — HW ↔ SW contract
+│
+├── firmware/                 # HARDPROG — one PlatformIO project per ESP32 (2 total)
+│   ├── rocket_esp/           # ESP32 #1 — Rocket ESP (avionics + ejection)
+│   │   └── src/{imu,orientation,csv_logger,telemetry,comms,pyro,state,utils}/
+│   ├── gcs_esp/              # ESP32 #2 — GCS ESP / ESP-Laptop (radio ↔ USB)
+│   └── bench/                # standalone bench tests (IMU, SD, MOSFET dummy load, ESP-NOW range)
+├── hardware/                 # HARDPROG — BOM, wiring, schematics, pcb, checklists, test reports
+│
+├── gcs/                      # SOFTPROG
+│   ├── backend/              # serial reader, parser, CSV writer/import, commands, WebSocket
+│   └── frontend/             # dashboard (HTML/JS/CSS): charts, orientation, controls, replay
+├── tools/                    # SOFTPROG — simulator, CSV validator, plotting
+├── data/{samples,logs}/      # sample + recorded CSV
+├── docs/                     # flowchart PDF, protocol, architecture, test plan
 └── presentation/             # slides, demo-script.md
 ```
+
+Complete tree with per-folder owners: [`brief.md` §3](brief.md).
 
 ---
 
@@ -122,15 +128,15 @@ cd openrocket-gcs
 ### 2. Flash the firmware
 ```bash
 # Rocket ESP32
-pio run -d firmware/rocket -t upload
+pio run -d firmware/rocket_esp -t upload
 
 # GCS ESP32
-pio run -d firmware/gcs_bridge -t upload
+pio run -d firmware/gcs_esp -t upload
 
 # Serial monitor (example)
-pio device monitor -d firmware/gcs_bridge -b 115200
+pio device monitor -d firmware/gcs_esp -b 115200
 ```
-Set the peer MAC addresses and pins in `firmware/rocket/include/config.h` (and the GCS equivalent) before flashing.
+Set the peer MAC addresses and pins in `firmware/rocket_esp/include/config.h` and `firmware/gcs_esp/include/config.h` before flashing.
 
 ### 3. Run the GCS
 ```bash
@@ -188,8 +194,8 @@ The pop test controls an ejection charge. **Treat it as hazardous at all times.*
 
 | Role | Member | Owns |
 |---|---|---|
-| HP-1 — Rocket sensing & firmware lead | _TBD_ | `firmware/rocket/` (sensors, state, utils) |
-| HP-2 — Comms, pyro & power | _TBD_ | `firmware/gcs_bridge/`, `firmware/rocket/{comms,pyro}`, `hardware/` |
+| HP-1 — Rocket sensing & firmware lead | _TBD_ | `firmware/rocket_esp/src/{imu,orientation,csv_logger,telemetry}/` |
+| HP-2 — Comms, pyro & power | _TBD_ | `firmware/gcs_esp/`, `firmware/rocket_esp/src/{comms,pyro,state}/`, `hardware/` |
 | SP-1 — GCS backend & protocol | _TBD_ | `gcs/backend/`, `shared/protocol/` (with HP-2) |
 | SP-2 — GCS frontend / dashboard | _TBD_ | `gcs/frontend/` |
 | SP-3 — Logging, simulation & QA | _TBD_ | `data/`, `tools/`, `docs/test-plan.md`, `presentation/` |
