@@ -1,55 +1,63 @@
+
 #include "orientation.h"
+
+#include <Arduino.h>
 #include <math.h>
 
-constexpr float radiansToDegrees = 57.2957795f;
+Orientation::Orientation() {
 
-void Orientation::begin() {
-    roll = 0.0f;
-    pitch = 0.0f;
-    yaw = 0.0f;
-
-    previousTime = millis();
+    yawAngle = 0.0f;
 }
 
-void Orientation::update(const MPU6050Data &mpuData) {
-    if (!mpuData.valid) return;
+void Orientation::reset() {
 
-    uint32_t currentTime = mpuData.timestamp;
+    yawAngle = 0.0f;
+}
 
-    float dt = (currentTime - previousTime) / 1000.0f;
-    previousTime = currentTime;
+OrientationData Orientation::calculate(
+    const SensorData& sensor,
+    float deltaTime
+) {
 
-    if (dt <= 0.0f || dt > 0.5f) return;
+    OrientationData result;
 
-    // Accelerometer angle estimation
-    float rollAcc = atan2f(
-        mpuData.ay,
-        mpuData.az
-    ) * radiansToDegrees;
+    // ============================================
+    // ROLL
+    // ============================================
 
-    float pitchAcc = atan2f(
-        -mpuData.ax,
+    result.roll = atan2f(
+        sensor.ay,
+        sensor.az
+    ) * RAD_TO_DEG;
+
+    // ============================================
+    // PITCH
+    // ============================================
+
+    result.pitch = atan2f(
+        -sensor.ax,
         sqrtf(
-            mpuData.ay * mpuData.ay +
-            mpuData.az * mpuData.az
+            sensor.ay * sensor.ay +
+            sensor.az * sensor.az
         )
-    ) * radiansToDegrees;
+    ) * RAD_TO_DEG;
 
-    // Complementary filter
-    roll = alpha * (roll + mpuData.gx * dt)
-         + (1.0f - alpha) * rollAcc;
+    // ============================================
+    // YAW
+    // ============================================
 
-    pitch = alpha * (pitch + mpuData.gy * dt)
-          + (1.0f - alpha) * pitchAcc;
+    yawAngle += sensor.gz * deltaTime;
 
-    // Gyroscope integration for yaw
-    yaw += mpuData.gz * dt;
-}
+    // Normalize yaw to -180 ... +180 degrees
+    if (yawAngle > 180.0f) {
+        yawAngle -= 360.0f;
+    }
 
-OrientationData Orientation::getData() const {
-    return {
-        roll,
-        pitch,
-        yaw
-    };
+    if (yawAngle < -180.0f) {
+        yawAngle += 360.0f;
+    }
+
+    result.yaw = yawAngle;
+
+    return result;
 }

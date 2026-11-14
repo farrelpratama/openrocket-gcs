@@ -2,21 +2,31 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#include <Arduino.h>
+// MPU6050 I2C address
+#define MPU6050_ADDRESS 0x68
 
-// System configuration
-#define DEVICE_NAME "ROCKET_ESP"
-#define FIRMWARE_VERSION "0.1.0"
+// I2C configuration
+#define I2C_CLOCK_SPEED 400000
 
-// Serial configuration
-#define SERIAL_BAUDRATE 115200
+// Accelerometer configuration: +/- 8g
+#define ACCEL_RANGE_G 8.0f
+#define ACCEL_SENSITIVITY 4096.0f
 
-// IMU configuration
-#define IMU_SAMPLE_RATE_HZ 10
-#define IMU_SAMPLE_INTERVAL_MS (1000 / IMU_SAMPLE_RATE_HZ)
+// Gyroscope configuration: +/- 500 degrees/second
+#define GYRO_RANGE_DPS 500.0f
+#define GYRO_SENSITIVITY 65.5f
 
-// Sensor configuration
-#define IMU_ACCEL_RANGE 8
-#define IMU_GYRO_RANGE 500
+// Calibration configuration
+#define GYRO_CALIBRATION_SAMPLES 2000
+#define GYRO_CALIBRATION_DELAY 5
+
+// Calibration noise warning threshold
+#define GYRO_STD_WARNING 0.5f
+
+// Main loop interval
+#define SAMPLE_INTERVAL_MS 10
+
+// Standard gravity
+#define GRAVITY 9.80665f
 
 #endif

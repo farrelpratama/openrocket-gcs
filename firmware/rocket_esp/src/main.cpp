@@ -1,66 +1,122 @@
+
 #include <Arduino.h>
+#include <Wire.h>
 
 #include "config.h"
+#include "pins.h"
 #include "MPU6050.h"
 #include "orientation.h"
 
+// ============================================
+// GLOBAL OBJECTS
+// ============================================
+
 MPU6050 mpu;
-MPU6050Data mpuData;
 Orientation orientation;
 
-uint32_t lastSampleTime = 0;
+// Timing
+uint32_t previousTime = 0;
+
+// ============================================
+// SETUP
+// ============================================
 
 void setup() {
-    Serial.begin(SERIAL_BAUDRATE);
-    delay(500);
 
-    Serial.println();
-    Serial.println("================================");
-    Serial.println("     ROCKET AVIONICS SYSTEM");
-    Serial.println("================================");
-    Serial.print("Device: ");
-    Serial.println(DEVICE_NAME);
-    Serial.print("Firmware: ");
-    Serial.println(FIRMWARE_VERSION);
-    Serial.println();
+    Serial.begin(115200);
 
+    delay(1000);
+
+    Serial.println("\n================================");
+    Serial.println("       ROCKET FLIGHT COMPUTER");
+    Serial.println("================================");
+
+    // Initialize I2C
+    Wire.begin(
+        MPU_SDA_PIN,
+        MPU_SCL_PIN
+    );
+
+    Wire.setClock(I2C_CLOCK_SPEED);
+
+    // Initialize MPU6050
     if (!mpu.begin()) {
-        Serial.println("[SYSTEM] IMU initialization failed!");
-        return;
+
+        Serial.println(
+            "[FATAL] MPU6050 initialization failed."
+        );
+
+        while (true) {
+            delay(1000);
+        }
     }
 
-    orientation.begin();
-    Serial.println("[SYSTEM] Orientation initialized.");
+    // Calibrate gyroscope
+    if (!mpu.calibrateGyroscope()) {
+
+        Serial.println(
+            "[FATAL] Gyroscope calibration failed."
+        );
+
+        while (true) {
+            delay(1000);
+        }
+    }
+
+    // Reset orientation
+    orientation.reset();
+
+    previousTime = micros();
+
+    Serial.println("\n================================");
+    Serial.println("   ORIENTATION SYSTEM READY");
+    Serial.println("================================");
+
+    Serial.println(
+        "Roll | Pitch | Yaw"
+    );
 }
 
+// ============================================
+// MAIN LOOP
+// ============================================
+
 void loop() {
-    const uint32_t currentTime = millis();
-    if (currentTime - lastSampleTime < IMU_SAMPLE_INTERVAL_MS) {
+
+    SensorData sensor;
+
+    // Read sensor
+    if (!mpu.readSensor(sensor)) {
+
+        Serial.println(
+            "[ERROR] Failed to read sensor."
+        );
+
         return;
     }
 
-    lastSampleTime = currentTime;
-    if (!mpu.read(mpuData)) {
-        Serial.println("[IMU] Sensor read failed!");
-        return;
-    }
+    // Calculate elapsed time
+    uint32_t currentTime = micros();
 
-    orientation.update(mpuData);
-    const OrientationData orientationData = orientation.getData();
+    float deltaTime =
+        (currentTime - previousTime) / 1000000.0f;
+
+    previousTime = currentTime;
+
+    // Calculate orientation
+    OrientationData result =
+        orientation.calculate(
+            sensor,
+            deltaTime
+        );
+
+    // Display results
     Serial.printf(
-        "TIME: %lu ms | "
-        "ACC: X=%.2f Y=%.2f Z=%.2f | "
-        "GYRO: X=%.2f Y=%.2f Z=%.2f | "
-        "ROLL: %.2f | PITCH: %.2f | YAW: %.2f\n",
-        static_cast<unsigned long>(mpuData.timestamp),
-        mpuData.ax,
-        mpuData.ay,
-        mpuData.az,
-        mpuData.gx,
-        mpuData.gy,
-        mpuData.gz,
-        orientationData.roll,
-        orientationData.pitch,
-        orientationData.yaw
+        "ROLL: %7.2f | PITCH: %7.2f | YAW: %7.2f\n",
+        result.roll,
+        result.pitch,
+        result.yaw
     );
+
+    delay(SAMPLE_INTERVAL_MS);
 }
