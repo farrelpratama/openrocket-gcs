@@ -1,18 +1,22 @@
-#include <Arduino.h>
 
-// put function declarations here:
-int myFunction(int, int);
+#include <Arduino.h>
+#include "espnow_receiver.h"
 
 void setup() {
-  // put your setup code here, to run once:
-  int result = myFunction(2, 3);
+    Serial.begin(115200);
+    delay(1000);
+
+    Serial.println("# GCS TELEMETRY RECEIVER");
+
+    if (!initReceiver()) {
+        Serial.println("# Receiver initialization failed");
+
+        while (true) {
+            delay(100);
+        }
+    }
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
-}
-
-// put function definitions here:
-int myFunction(int x, int y) {
-  return x + y;
+    // ESP-NOW reception is handled by the callback.
 }
