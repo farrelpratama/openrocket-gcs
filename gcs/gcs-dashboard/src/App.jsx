@@ -16,6 +16,7 @@ import {
   Flame,
   Play,
   Square,
+  RotateCcw,
   Upload,
   Download,
   Wifi,
@@ -92,6 +93,21 @@ export default function App() {
     } catch (error) {
       addLog(`SERIAL ERROR: ${error.message}`);
     }
+  };
+
+  // ==========================================
+  // HANDLER: RESET MISSION & TELEMETRY
+  // ==========================================
+  const handleReset = () => {
+    setIsRunning(false);
+    setArmed(false);
+    setConfirmArm(false);
+    setConfirmPop(false);
+    setEjectionTriggered(false);
+    setTelemetryHistory([]);
+    setReplayIndex(0);
+    startTimeRef.current = null;
+    addLog("🔄 SYSTEM RESET: Telemetry graphs, timer, and pyro states cleared.");
   };
 
   // ==========================================
@@ -279,7 +295,7 @@ export default function App() {
             <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wider mb-3">
               Telemetry Source
             </h2>
-            
+
             {/* Tombol Koneksi USB Serial ESP32 */}
             <button
               onClick={connectSerial}
@@ -334,7 +350,8 @@ export default function App() {
               </div>
             )}
 
-            <div className="flex gap-2">
+            {/* Tombol START, STOP, dan RESET */}
+            <div className="grid grid-cols-3 gap-1.5">
               <button
                 onClick={() => {
                   if (!isRunning && telemetryHistory.length === 0) {
@@ -344,9 +361,9 @@ export default function App() {
                   addLog(`Started ${mode} telemetry.`);
                 }}
                 disabled={isRunning}
-                className="flex-1 flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white py-2 rounded-lg text-xs font-bold transition"
+                className="flex items-center justify-center gap-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white py-2 rounded-lg text-xs font-bold transition"
               >
-                <Play className="w-4 h-4" /> START
+                <Play className="w-3.5 h-3.5" /> START
               </button>
               <button
                 onClick={() => {
@@ -354,9 +371,16 @@ export default function App() {
                   addLog("Telemetry stream stopped.");
                 }}
                 disabled={!isRunning}
-                className="flex-1 flex items-center justify-center gap-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 text-white py-2 rounded-lg text-xs font-bold transition"
+                className="flex items-center justify-center gap-1 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 text-white py-2 rounded-lg text-xs font-bold transition"
               >
-                <Square className="w-4 h-4" /> STOP
+                <Square className="w-3.5 h-3.5" /> STOP
+              </button>
+              <button
+                onClick={handleReset}
+                className="flex items-center justify-center gap-1 bg-rose-600/80 hover:bg-rose-500 text-white py-2 rounded-lg text-xs font-bold transition"
+                title="Reset Grafik, Waktu, dan Status"
+              >
+                <RotateCcw className="w-3.5 h-3.5" /> RESET
               </button>
             </div>
 
