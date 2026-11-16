@@ -5,7 +5,7 @@ export default defineConfig({
   clearScreen: false,
 
   server: {
-    port: 1420,
+    port: 3000,
     strictPort: true,
   },
 

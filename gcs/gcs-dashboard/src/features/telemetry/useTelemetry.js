@@ -16,16 +16,13 @@ import {
 
 export function useTelemetry({ addLog }) {
   const [mode, setMode] = useState("SIMULATION");
-
   const [isRunning, setIsRunning] = useState(false);
-
   const [telemetryHistory, setTelemetryHistory] = useState([]);
-
   const [replayData, setReplayData] = useState([]);
-
   const [replayIndex, setReplayIndex] = useState(0);
 
   const startTimeRef = useRef(null);
+  const replayIndexRef = useRef(0);
 
   const addTelemetry = useCallback((point) => {
     setTelemetryHistory((previous) => [
@@ -49,7 +46,6 @@ export function useTelemetry({ addLog }) {
     }
 
     setIsRunning(true);
-
     addLog?.(`Started ${mode.toLowerCase()} source.`);
   }, [mode, replayData.length, addLog]);
 
@@ -57,6 +53,7 @@ export function useTelemetry({ addLog }) {
     setIsRunning(false);
     setTelemetryHistory([]);
     setReplayIndex(0);
+    replayIndexRef.current = 0;
     startTimeRef.current = null;
   }, []);
 
@@ -66,6 +63,7 @@ export function useTelemetry({ addLog }) {
       setMode("REPLAY");
       setReplayData(data);
       setReplayIndex(0);
+      replayIndexRef.current = 0;
       setTelemetryHistory([]);
 
       addLog?.(
@@ -85,7 +83,8 @@ export function useTelemetry({ addLog }) {
 
     const interval = window.setInterval(() => {
       if (mode === "REPLAY") {
-        const point = replayData[replayIndex];
+        const currentIndex = replayIndexRef.current;
+        const point = replayData[currentIndex];
 
         if (!point) {
           setIsRunning(false);
@@ -95,9 +94,11 @@ export function useTelemetry({ addLog }) {
 
         addTelemetry(point);
 
-        setReplayIndex((index) => index + 1);
+        const nextIndex = currentIndex + 1;
+        replayIndexRef.current = nextIndex;
+        setReplayIndex(nextIndex);
 
-        if (replayIndex + 1 >= replayData.length) {
+        if (nextIndex >= replayData.length) {
           setIsRunning(false);
           addLog?.("CSV replay finished.");
         }
@@ -110,15 +111,10 @@ export function useTelemetry({ addLog }) {
       }
 
       const elapsed = Number(
-        (
-          (Date.now() - startTimeRef.current) /
-          1000
-        ).toFixed(2)
+        ((Date.now() - startTimeRef.current) / 1000).toFixed(2)
       );
 
-      addTelemetry(
-        generateSimulatedTelemetry(elapsed)
-      );
+      addTelemetry(generateSimulatedTelemetry(elapsed));
 
       if (elapsed >= 22) {
         setIsRunning(false);
@@ -131,7 +127,6 @@ export function useTelemetry({ addLog }) {
     isRunning,
     mode,
     replayData,
-    replayIndex,
     addTelemetry,
     addLog,
   ]);
@@ -142,11 +137,10 @@ export function useTelemetry({ addLog }) {
       setMode(nextMode);
       setTelemetryHistory([]);
       setReplayIndex(0);
+      replayIndexRef.current = 0;
       startTimeRef.current = null;
 
-      addLog?.(
-        `Switched to ${nextMode.toLowerCase()} mode.`
-      );
+      addLog?.(`Switched to ${nextMode.toLowerCase()} mode.`);
     },
     [addLog]
   );
@@ -154,12 +148,10 @@ export function useTelemetry({ addLog }) {
   return {
     mode,
     selectMode,
-
     isRunning,
     start,
     stop,
     clear,
-
     telemetryHistory,
 
     latest:
@@ -169,7 +161,6 @@ export function useTelemetry({ addLog }) {
 
     replayData,
     replayIndex,
-
     loadReplay,
     addTelemetry,
   };
