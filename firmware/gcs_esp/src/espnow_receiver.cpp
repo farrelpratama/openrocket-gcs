@@ -5,56 +5,16 @@
 #include <WiFi.h>
 #include <esp_now.h>
 #include <esp_wifi.h>
-
 #include <string.h>
 
 #include "telemetry.h"
+#include "command_packet.h"
 
 #define ESPNOW_CHANNEL 1
 
-
-static void OnDataRecv(
-    const esp_now_recv_info_t* esp_now_info,
-    const uint8_t* incomingData,
-    int len
+static void printTelemetry(
+    const TelemetryPacket& data
 ) {
-    // Validate packet size
-    if (len != sizeof(TelemetryPacket)) {
-        Serial.printf(
-            "# Invalid packet size: %d bytes\n",
-            len
-        );
-        return;
-    }
-
-    TelemetryPacket receivedData;
-
-    memcpy(
-        &receivedData,
-        incomingData,
-        sizeof(TelemetryPacket)
-    );
-
-    // Validate telemetry version
-    if (receivedData.version != TELEMETRY_VERSION) {
-        Serial.println("# Unsupported telemetry version");
-        return;
-    }
-
-    // Print received MAC address (optional)
-    if (esp_now_info != nullptr) {
-        Serial.printf(
-            "# Received from: %02X:%02X:%02X:%02X:%02X:%02X\n",
-            esp_now_info->src_addr[0],
-            esp_now_info->src_addr[1],
-            esp_now_info->src_addr[2],
-            esp_now_info->src_addr[3],
-            esp_now_info->src_addr[4],
-            esp_now_info->src_addr[5]
-        );
-    }
-
-    // CSV telemetry output
     Serial.printf(
         "%lu,%lu,"
         "%.3f,%.3f,%.3f,"
@@ -63,30 +23,73 @@ static void OnDataRecv(
         "%.2f,%.2f,%.2f,%.2f,"
         "%.2f,%.2f,%.2f\n",
 
-        (unsigned long)receivedData.sequence,
-        (unsigned long)receivedData.timestampUs,
+        (unsigned long)data.sequence,
+        (unsigned long)data.timestampUs,
 
-        receivedData.ax,
-        receivedData.ay,
-        receivedData.az,
+        data.ax, data.ay, data.az,
+        data.gx, data.gy, data.gz,
 
-        receivedData.gx,
-        receivedData.gy,
-        receivedData.gz,
+        data.mpuTemp,
 
-        receivedData.mpuTemp,
+        data.baroTemp,
+        data.pressurePa,
+        data.pressureHpa,
+        data.altitude,
 
-        receivedData.baroTemp,
-        receivedData.pressurePa,
-        receivedData.pressureHpa,
-        receivedData.altitude,
-
-        receivedData.roll,
-        receivedData.pitch,
-        receivedData.yaw
+        data.roll,
+        data.pitch,
+        data.yaw
     );
 }
 
+static void OnDataRecv(
+    const esp_now_recv_info_t* info,
+    const uint8_t* incomingData,
+    int len
+) {
+    if (incomingData == nullptr) {
+        return;
+    }
+
+    // Handle command acknowledgement.
+    if (len == sizeof(CommandPacket)) {
+        CommandPacket command = {};
+
+        memcpy(&command, incomingData, sizeof(command));
+
+        if (!isValidCommand(command)) {
+            Serial.println("# Invalid command packet");
+            return;
+        }
+
+        if (command.type == COMMAND_ACK) {
+            Serial.printf(
+                "# TEST_ACK,%lu,%u\n",
+                (unsigned long)command.commandId,
+                command.status
+            );
+        }
+
+        return;
+    }
+
+    // Handle ordinary telemetry.
+    if (len != sizeof(TelemetryPacket)) {
+        Serial.printf("# Invalid packet size: %d\n", len);
+        return;
+    }
+
+    TelemetryPacket data = {};
+
+    memcpy(&data, incomingData, sizeof(data));
+
+    if (data.version != TELEMETRY_VERSION) {
+        Serial.println("# Unsupported telemetry version");
+        return;
+    }
+
+    printTelemetry(data);
+}
 
 bool initReceiver() {
     WiFi.mode(WIFI_STA);
@@ -106,7 +109,13 @@ bool initReceiver() {
 
     esp_now_register_recv_cb(OnDataRecv);
 
+    Serial.printf(
+        "# GCS MAC: %s\n",
+        WiFi.macAddress().c_str()
+    );
+
     Serial.println("# GCS receiver ready");
+
     Serial.println(
         "sequence,timestamp_us,"
         "ax,ay,az,gx,gy,gz,mpu_temp,"
