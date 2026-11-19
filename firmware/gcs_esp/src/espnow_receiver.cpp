@@ -1,7 +1,6 @@
 
 #include "espnow_receiver.h"
 
-#include <Arduino.h>
 #include <WiFi.h>
 #include <esp_now.h>
 #include <esp_wifi.h>
@@ -9,48 +8,41 @@
 
 #include "config.h"
 #include "telemetry.h"
-#include "command_packet.h"
+#include "command_protocol.h"
 
 static uint32_t nextCommandId = 1;
-static esp_now_peer_info_t rocketPeer{};
 
-// ==========================================
-// ESP-NOW SEND CALLBACK
-// ==========================================
-
-static void OnDataSent(
-    const uint8_t* mac,
-    esp_now_send_status_t status
+static void printAcknowledgement(
+    const AcknowledgementPacket& ack
 ) {
-    if (status == ESP_NOW_SEND_SUCCESS) {
-        Serial.println("# ESP-NOW delivery: SUCCESS");
-    } else {
-        Serial.println("# ESP-NOW delivery: FAILED");
-    }
+    Serial.printf(
+        "# ACK id=%lu status=%u LED=%s\n",
+        static_cast<unsigned long>(ack.commandId),
+        ack.status,
+        ack.ledActive ? "ON" : "OFF"
+    );
 }
 
-// ==========================================
-// ESP-NOW RECEIVE CALLBACK
-// ==========================================
-
-static void OnDataRecv(
+static void onDataReceived(
     const esp_now_recv_info_t* info,
     const uint8_t* data,
     int len
 ) {
-    if (data == nullptr) return;
+    if (info == nullptr || data == nullptr) {
+        return;
+    }
 
-    // --------------------------------------
-    // TELEMETRY PACKET
-    // --------------------------------------
+    // Accept packets only from the configured Rocket ESP32.
+    if (memcmp(info->src_addr, ROCKET_MAC, 6) != 0) {
+        return;
+    }
 
+    // Telemetry packet
     if (len == sizeof(TelemetryPacket)) {
         TelemetryPacket packet{};
-
         memcpy(&packet, data, sizeof(packet));
 
         if (packet.version != TELEMETRY_VERSION) {
-            Serial.println("# Invalid telemetry version");
             return;
         }
 
@@ -62,8 +54,8 @@ static void OnDataRecv(
             "%.2f,%.2f,%.2f,%.2f,"
             "%.2f,%.2f,%.2f\n",
 
-            (unsigned long)packet.sequence,
-            (unsigned long)packet.timestampUs,
+            static_cast<unsigned long>(packet.sequence),
+            static_cast<unsigned long>(packet.timestampUs),
 
             packet.ax,
             packet.ay,
@@ -88,224 +80,130 @@ static void OnDataRecv(
         return;
     }
 
-    // --------------------------------------
-    // ACKNOWLEDGEMENT PACKET
-    // --------------------------------------
-
+    // Command acknowledgement packet
     if (len == sizeof(AcknowledgementPacket)) {
         AcknowledgementPacket ack{};
-
         memcpy(&ack, data, sizeof(ack));
 
         if (ack.magic != COMMAND_MAGIC ||
-            ack.version != COMMAND_PROTOCOL_VERSION) {
-            Serial.println("# Invalid acknowledgement");
+            ack.version != COMMAND_VERSION) {
             return;
         }
 
-        const char* status = "UNKNOWN";
-
-        switch (ack.status) {
-            case ACK_ACCEPTED:
-                status = "ACCEPTED";
-                break;
-
-            case ACK_COMPLETED:
-                status = "COMPLETED";
-                break;
-
-            case ACK_ABORTED:
-                status = "ABORTED";
-                break;
-
-            case ACK_REJECTED:
-                status = "REJECTED";
-                break;
-
-            case ACK_BUSY:
-                status = "BUSY";
-                break;
-        }
-
-        Serial.printf(
-            "# LED TEST ACK | ID: %lu | STATUS: %s\n",
-            (unsigned long)ack.commandId,
-            status
-        );
-
-        return;
+        printAcknowledgement(ack);
     }
-
-    Serial.printf(
-        "# Unknown packet received: %d bytes\n",
-        len
-    );
 }
 
-// ==========================================
-// SEND COMMAND
-// ==========================================
+bool initReceiver() {
+    WiFi.mode(WIFI_STA);
 
-static bool sendCommand(uint8_t type) {
+    Serial.print("# GCS MAC: ");
+    Serial.println(WiFi.macAddress());
+
+    if (esp_wifi_set_channel(
+            GCSConfig::ESPNOW_CHANNEL,
+            WIFI_SECOND_CHAN_NONE
+        ) != ESP_OK) {
+        Serial.println("# Failed to configure Wi-Fi channel");
+        return false;
+    }
+
+    if (esp_now_init() != ESP_OK) {
+        Serial.println("# ESP-NOW initialization failed");
+        return false;
+    }
+
+    esp_now_peer_info_t peer{};
+    memcpy(peer.peer_addr, ROCKET_MAC, 6);
+
+    peer.channel = GCSConfig::ESPNOW_CHANNEL;
+    peer.ifidx = WIFI_IF_STA;
+    peer.encrypt = false;
+
+    esp_err_t peerResult = esp_now_add_peer(&peer);
+
+    if (peerResult != ESP_OK &&
+        peerResult != ESP_ERR_ESPNOW_EXIST) {
+        Serial.printf(
+            "# Failed to add Rocket peer: %d\n",
+            static_cast<int>(peerResult)
+        );
+        return false;
+    }
+
+    if (esp_now_register_recv_cb(onDataReceived) != ESP_OK) {
+        Serial.println("# Receive callback registration failed");
+        return false;
+    }
+
+    Serial.println("# GCS receiver ready");
+    Serial.println("# Commands: TEST, OFF, STATUS, HELP");
+
+    Serial.println(
+        "sequence,timestamp_us,"
+        "ax,ay,az,gx,gy,gz,mpu_temp,"
+        "baro_temp,pressure_pa,pressure_hpa,altitude,"
+        "roll,pitch,yaw"
+    );
+
+    return true;
+}
+
+bool sendRocketCommand(uint8_t command) {
     CommandPacket packet{};
 
     packet.magic = COMMAND_MAGIC;
-    packet.version = COMMAND_PROTOCOL_VERSION;
-    packet.type = type;
+    packet.version = COMMAND_VERSION;
+    packet.command = command;
     packet.commandId = nextCommandId++;
 
     esp_err_t result = esp_now_send(
-        rocketPeer.peer_addr,
+        ROCKET_MAC,
         reinterpret_cast<const uint8_t*>(&packet),
         sizeof(packet)
     );
 
     if (result != ESP_OK) {
         Serial.printf(
-            "# Command submission failed: %d\n",
-            (int)result
+            "# Command send failed: %d\n",
+            static_cast<int>(result)
         );
-
         return false;
     }
 
     Serial.printf(
-        "# Command submitted | ID: %lu | TYPE: %u\n",
-        (unsigned long)packet.commandId,
-        type
+        "# Command sent: %u (ID %lu)\n",
+        command,
+        static_cast<unsigned long>(packet.commandId)
     );
 
     return true;
 }
 
-bool sendLedTestStart() {
-    return sendCommand(COMMAND_LED_TEST_START);
-}
-
-bool sendLedTestAbort() {
-    return sendCommand(COMMAND_LED_TEST_ABORT);
-}
-
-// ==========================================
-// INITIALIZE GCS
-// ==========================================
-
-bool initReceiver() {
-    WiFi.mode(WIFI_STA);
-
-    delay(100);
-
-    Serial.println();
-    Serial.println("================================");
-    Serial.println("       GCS ESP32 STARTUP        ");
-    Serial.println("================================");
-
-    Serial.print("# GCS MAC: ");
-    Serial.println(WiFi.macAddress());
-
-    Serial.print("# Rocket MAC: ");
-
-    char macString[18];
-
-    snprintf(
-        macString,
-        sizeof(macString),
-        "%02X:%02X:%02X:%02X:%02X:%02X",
-        GCSConfig::ROCKET_MAC[0],
-        GCSConfig::ROCKET_MAC[1],
-        GCSConfig::ROCKET_MAC[2],
-        GCSConfig::ROCKET_MAC[3],
-        GCSConfig::ROCKET_MAC[4],
-        GCSConfig::ROCKET_MAC[5]
-    );
-
-    Serial.println(macString);
-
-    // Configure channel
-    if (esp_wifi_set_channel(
-            GCSConfig::ESPNOW_CHANNEL,
-            WIFI_SECOND_CHAN_NONE
-        ) != ESP_OK) {
-
-        Serial.println("# WiFi channel configuration failed");
-        return false;
+void processGCSInput() {
+    if (!Serial.available()) {
+        return;
     }
 
-    // Initialize ESP-NOW
-    if (esp_now_init() != ESP_OK) {
-        Serial.println("# ESP-NOW initialization failed");
-        return false;
+    String input = Serial.readStringUntil('\n');
+    input.trim();
+    input.toUpperCase();
+
+    if (input == "TEST") {
+        sendRocketCommand(CMD_TEST_START);
     }
-
-    // Register callbacks
-    if (esp_now_register_recv_cb(OnDataRecv) != ESP_OK) {
-        Serial.println("# Receive callback registration failed");
-        return false;
+    else if (input == "OFF") {
+        sendRocketCommand(CMD_TEST_STOP);
     }
-
-    if (esp_now_register_send_cb(OnDataSent) != ESP_OK) {
-        Serial.println("# Send callback registration failed");
-        return false;
+    else if (input == "STATUS") {
+        sendRocketCommand(CMD_STATUS);
     }
-
-    // Validate Rocket MAC
-    bool macUnset = true;
-
-    for (uint8_t b : GCSConfig::ROCKET_MAC) {
-        if (b != 0) {
-            macUnset = false;
-            break;
-        }
+    else if (input == "HELP") {
+        Serial.println("# TEST   - Start 3-second LED test");
+        Serial.println("# OFF    - Stop LED test");
+        Serial.println("# STATUS - Request LED status");
     }
-
-    if (macUnset) {
-        Serial.println("# ERROR: Rocket MAC is not configured");
-        return false;
+    else if (input.length() > 0) {
+        Serial.println("# Unknown command. Type HELP.");
     }
-
-    // Register Rocket as peer
-    memset(&rocketPeer, 0, sizeof(rocketPeer));
-
-    memcpy(
-        rocketPeer.peer_addr,
-        GCSConfig::ROCKET_MAC,
-        6
-    );
-
-    rocketPeer.channel = GCSConfig::ESPNOW_CHANNEL;
-    rocketPeer.ifidx = WIFI_IF_STA;
-    rocketPeer.encrypt = false;
-
-    esp_err_t peerResult = esp_now_add_peer(&rocketPeer);
-
-    if (peerResult != ESP_OK &&
-        peerResult != ESP_ERR_ESPNOW_EXIST) {
-
-        Serial.printf(
-            "# Failed to add Rocket peer: %d\n",
-            (int)peerResult
-        );
-
-        return false;
-    }
-
-    Serial.println("# ESP-NOW initialized successfully");
-    Serial.println("# Rocket peer registered");
-    Serial.println("# Telemetry receiver ready");
-    Serial.println("# Command transmitter ready");
-
-    Serial.println();
-    Serial.println("# Available commands:");
-    Serial.println("# FIRE = Start LED-only test");
-    Serial.println("# OFF  = Abort LED-only test");
-
-    Serial.println();
-    Serial.println(
-        "sequence,timestamp_us,"
-        "ax,ay,az,gx,gy,gz,mpu_temp,"
-        "baro_temp,pressure_pa,pressure_hpa,"
-        "altitude,roll,pitch,yaw"
-    );
-
-    return true;
 }

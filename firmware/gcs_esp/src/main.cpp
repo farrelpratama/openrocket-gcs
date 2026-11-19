@@ -10,34 +10,18 @@ void setup() {
 
     delay(1000);
 
+    Serial.println();
+    Serial.println("=== GCS TELEMETRY + COMMAND SYSTEM ===");
+
     if (!initReceiver()) {
-        Serial.println("# GCS initialization FAILED");
+        Serial.println("# Receiver initialization failed");
 
         while (true) {
-            delay(1000);
+            delay(100);
         }
     }
 }
 
 void loop() {
-    if (Serial.available() > 0) {
-        String command = Serial.readStringUntil('\n');
-
-        command.trim();
-        command.toUpperCase();
-
-        if (command == "FIRE") {
-            Serial.println("# Sending LED test request...");
-            sendLedTestStart();
-        }
-
-        else if (command == "OFF") {
-            Serial.println("# Sending LED abort request...");
-            sendLedTestAbort();
-        }
-
-        else if (command.length() > 0) {
-            Serial.println("# Unknown command. Use FIRE or OFF.");
-        }
-    }
+    processGCSInput();
 }

@@ -1,96 +1,178 @@
+
 #include "command_receiver.h"
-#include <Arduino.h>
+
 #include <WiFi.h>
 #include <esp_now.h>
+#include <esp_wifi.h>
 #include <string.h>
-#include "command_packet.h"
-#include "test_indicator.h"
 
-static portMUX_TYPE commandMux = portMUX_INITIALIZER_UNLOCKED;
+#include "config.h"
+#include "command_protocol.h"
+
+static uint8_t gcsAddress[6];
+
+static volatile bool commandPending = false;
 static CommandPacket pendingCommand;
-static uint8_t pendingSource[6];
-static bool commandPending = false;
-static uint8_t activeSourceMAC[6] = {0};
-static uint32_t activeCommandId = 0;
-static bool completionAckPending = false;
 
-static void sendAcknowledgement(const uint8_t* mac, uint32_t id, AckStatus status) {
+static bool ledActive = false;
+static uint32_t ledStartTime = 0;
+
+static void sendAcknowledgement(
+    uint32_t commandId,
+    AckStatus status
+) {
     AcknowledgementPacket ack{};
+
     ack.magic = COMMAND_MAGIC;
-    ack.version = COMMAND_PROTOCOL_VERSION;
-    ack.status = static_cast<uint8_t>(status);
-    ack.commandId = id;
-    esp_err_t result = esp_now_send(mac, reinterpret_cast<const uint8_t*>(&ack), sizeof(ack));
-    if (result != ESP_OK) Serial.printf("[COMMAND] ACK send request failed: %d\n", (int)result);
-}
+    ack.version = COMMAND_VERSION;
+    ack.status = status;
+    ack.commandId = commandId;
+    ack.ledActive = ledActive ? 1 : 0;
 
-static void OnCommandReceived(const esp_now_recv_info_t* info, const uint8_t* data, int len) {
-    if (info == nullptr || data == nullptr || len != (int)sizeof(CommandPacket)) return;
-    CommandPacket incoming{};
-    memcpy(&incoming, data, sizeof(incoming));
-    if (incoming.magic != COMMAND_MAGIC || incoming.version != COMMAND_PROTOCOL_VERSION) return;
-    if (incoming.type != COMMAND_LED_TEST_START && incoming.type != COMMAND_LED_TEST_ABORT) return;
+    esp_err_t result = esp_now_send(
+        gcsAddress,
+        reinterpret_cast<const uint8_t*>(&ack),
+        sizeof(ack)
+    );
 
-    portENTER_CRITICAL(&commandMux);
-    if (!commandPending) {
-        pendingCommand = incoming;
-        memcpy(pendingSource, info->src_addr, 6);
-        commandPending = true;
-    }
-    portEXIT_CRITICAL(&commandMux);
-}
-
-bool initCommandReceiver() {
-    if (!initTestIndicator()) return false;
-    esp_err_t result = esp_now_register_recv_cb(OnCommandReceived);
     if (result != ESP_OK) {
-        Serial.printf("[COMMAND] Receiver registration failed: %d\n", (int)result);
+        Serial.printf(
+            "[COMMAND] ACK send failed: %d\n",
+            static_cast<int>(result)
+        );
+    }
+}
+
+static void onCommandReceived(
+    const esp_now_recv_info_t* info,
+    const uint8_t* data,
+    int len
+) {
+    if (info == nullptr || data == nullptr) {
+        return;
+    }
+
+    if (memcmp(info->src_addr, gcsAddress, 6) != 0) {
+        return;
+    }
+
+    if (len != sizeof(CommandPacket)) {
+        return;
+    }
+
+    CommandPacket received{};
+    memcpy(&received, data, sizeof(received));
+
+    if (received.magic != COMMAND_MAGIC ||
+        received.version != COMMAND_VERSION) {
+        return;
+    }
+
+    // One command is processed at a time.
+    if (commandPending) {
+        return;
+    }
+
+    memcpy(&pendingCommand, &received, sizeof(received));
+    commandPending = true;
+}
+
+bool initCommandReceiver(const uint8_t* mac) {
+    if (mac == nullptr) {
         return false;
     }
-    Serial.println("[COMMAND] LED-only test receiver ready");
+
+    memcpy(gcsAddress, mac, 6);
+
+    pinMode(TEST_LED_PIN, OUTPUT);
+    digitalWrite(TEST_LED_PIN, LOW);
+
+    esp_now_peer_info_t peer{};
+    memcpy(peer.peer_addr, gcsAddress, 6);
+
+    peer.channel = ESPNOW_CHANNEL;
+    peer.ifidx = WIFI_IF_STA;
+    peer.encrypt = false;
+
+    esp_err_t peerResult = esp_now_add_peer(&peer);
+
+    // The transmitter may already have registered this peer.
+    if (peerResult != ESP_OK &&
+        peerResult != ESP_ERR_ESPNOW_EXIST) {
+        Serial.printf(
+            "[COMMAND] Peer registration failed: %d\n",
+            static_cast<int>(peerResult)
+        );
+        return false;
+    }
+
+    if (esp_now_register_recv_cb(onCommandReceived) != ESP_OK) {
+        Serial.println("[COMMAND] Callback registration failed");
+        return false;
+    }
+
+    Serial.println("[COMMAND] Receiver ready");
     return true;
 }
 
 void processCommandReceiver() {
-    CommandPacket cmd{};
-    uint8_t source[6]{};
-    bool hasCommand = false;
-
-    portENTER_CRITICAL(&commandMux);
+    // Process a received command outside the Wi-Fi callback.
     if (commandPending) {
-        cmd = pendingCommand;
-        memcpy(source, pendingSource, 6);
-        commandPending = false;
-        hasCommand = true;
-    }
-    portEXIT_CRITICAL(&commandMux);
+        CommandPacket command{};
 
-    if (hasCommand) {
-        Serial.printf("[COMMAND] Received ID=%lu type=%u\n", (unsigned long)cmd.commandId, cmd.type);
-        if (cmd.type == COMMAND_LED_TEST_START) {
-            if (isTestIndicatorActive()) {
-                sendAcknowledgement(source, cmd.commandId, ACK_BUSY);
-                Serial.println("[COMMAND] Rejected: LED test already active");
-            } else {
-                memcpy(activeSourceMAC, source, 6);
-                activeCommandId = cmd.commandId;
-                startTestIndicator();
-                sendAcknowledgement(source, cmd.commandId, ACK_ACCEPTED);
-                completionAckPending = true;
-            }
-        } else if (cmd.type == COMMAND_LED_TEST_ABORT) {
-            bool wasActive = isTestIndicatorActive();
-            stopTestIndicator();
-            sendAcknowledgement(source, cmd.commandId, wasActive ? ACK_ABORTED : ACK_REJECTED);
-            completionAckPending = false;
-            Serial.println(wasActive ? "[COMMAND] LED test aborted" : "[COMMAND] No active LED test");
+        noInterrupts();
+        memcpy(&command, &pendingCommand, sizeof(command));
+        commandPending = false;
+        interrupts();
+
+        switch (command.command) {
+            case CMD_TEST_START:
+                ledActive = true;
+                ledStartTime = millis();
+
+                digitalWrite(TEST_LED_PIN, HIGH);
+
+                Serial.println("[TEST] LED test started");
+                sendAcknowledgement(
+                    command.commandId,
+                    ACK_ACCEPTED
+                );
+                break;
+
+            case CMD_TEST_STOP:
+                ledActive = false;
+                digitalWrite(TEST_LED_PIN, LOW);
+
+                Serial.println("[TEST] LED test stopped");
+                sendAcknowledgement(
+                    command.commandId,
+                    ACK_STOPPED
+                );
+                break;
+
+            case CMD_STATUS:
+                sendAcknowledgement(
+                    command.commandId,
+                    ACK_STATUS
+                );
+                break;
+
+            default:
+                sendAcknowledgement(
+                    command.commandId,
+                    ACK_REJECTED
+                );
+                break;
         }
     }
 
-    bool wasActive = isTestIndicatorActive();
-    updateTestIndicator();
-    if (wasActive && !isTestIndicatorActive() && completionAckPending) {
-        sendAcknowledgement(activeSourceMAC, activeCommandId, ACK_COMPLETED);
-        completionAckPending = false;
+    // Automatic 3-second LED timeout.
+    if (ledActive &&
+        millis() - ledStartTime >= TEST_DURATION_MS) {
+
+        ledActive = false;
+        digitalWrite(TEST_LED_PIN, LOW);
+
+        Serial.println("[TEST] LED test completed");
     }
 }

@@ -1,6 +1,7 @@
 
 #include <Arduino.h>
 #include <Wire.h>
+#include <WiFi.h>
 
 #include "config.h"
 #include "pins.h"
@@ -12,7 +13,6 @@
 #include "telemetry.h"
 #include "espnow_transmitter.h"
 #include "command_receiver.h"
-#include <WiFi.h>
 
 // GCS ESP32 MAC address
 const uint8_t receiverMAC[] = {
@@ -31,13 +31,15 @@ uint32_t sequenceNumber = 0;
 uint32_t previousTime = 0;
 
 void setup() {
-    Serial.begin(115200);
+    Serial.begin(SERIAL_BAUD_RATE);
     delay(1000);
 
     Serial.println();
     Serial.println("=== ROCKET TELEMETRY SYSTEM ===");
 
     // Initialize I2C
+    Serial.println("[INIT] I2C");
+
     Wire.begin(MPU_SDA_PIN, MPU_SCL_PIN);
     Wire.setClock(I2C_CLOCK_SPEED);
 
@@ -46,7 +48,10 @@ void setup() {
 
     if (!mpu.begin()) {
         Serial.println("[ERROR] MPU6050 initialization failed");
-        while (true) delay(100);
+
+        while (true) {
+            delay(100);
+        }
     }
 
     // Initialize BMP180
@@ -54,41 +59,62 @@ void setup() {
 
     if (!barometer.begin()) {
         Serial.println("[ERROR] BMP180 initialization failed");
-        while (true) delay(100);
+
+        while (true) {
+            delay(100);
+        }
     }
 
-    // Calibrate sensors while the rocket is stationary.
+    // Calibrate gyroscope while the rocket is stationary
     Serial.println("[CALIBRATION] Gyroscope");
 
     if (!mpu.calibrateGyroscope()) {
         Serial.println("[ERROR] Gyroscope calibration failed");
-        while (true) delay(100);
+
+        while (true) {
+            delay(100);
+        }
     }
 
+    // Calibrate ground pressure using configured sample count
     Serial.println("[CALIBRATION] Ground pressure");
 
     if (!barometer.calibrateGroundPressure(
             BMP180_GROUND_SAMPLES
         )) {
         Serial.println("[ERROR] Barometer calibration failed");
-        while (true) delay(100);
+
+        while (true) {
+            delay(100);
+        }
     }
 
+    // Reset orientation calculations
     orientation.reset();
 
-    // Initialize ESP-NOW
+    // Initialize ESP-NOW transmitter
     Serial.println("[INIT] ESP-NOW");
 
     if (!initTransmitter(receiverMAC)) {
         Serial.println("[ERROR] Transmitter initialization failed");
-        while (true) delay(100);
+
+        while (true) {
+            delay(100);
+        }
     }
 
-    Serial.printf("[INFO] Rocket ESP32 MAC: %s\n", WiFi.macAddress().c_str());
+    // Print Rocket ESP32 MAC address
+    Serial.print("[INFO] Rocket ESP32 MAC: ");
+    Serial.println(WiFi.macAddress());
 
-    if (!initCommandReceiver()) {
+    // Initialize command receiver.
+    // receiverMAC is the GCS ESP32 MAC address.
+    if (!initCommandReceiver(receiverMAC)) {
         Serial.println("[ERROR] Command receiver initialization failed");
-        while (true) delay(100);
+
+        while (true) {
+            delay(100);
+        }
     }
 
     previousTime = micros();
@@ -97,6 +123,7 @@ void setup() {
 }
 
 void loop() {
+    // Process incoming GCS commands and update LED test
     processCommandReceiver();
 
     SensorData imuData;
@@ -134,7 +161,7 @@ void loop() {
     telemetry.sequence = sequenceNumber++;
     telemetry.timestampUs = currentTime;
 
-    // MPU6050
+    // MPU6050 data
     telemetry.ax = imuData.ax;
     telemetry.ay = imuData.ay;
     telemetry.az = imuData.az;
@@ -145,20 +172,20 @@ void loop() {
 
     telemetry.mpuTemp = imuData.temperature;
 
-    // BMP180
+    // BMP180 data
     telemetry.baroTemp = baroData.temperatureC;
     telemetry.pressurePa = baroData.pressurePa;
     telemetry.pressureHpa = baroData.pressureHpa;
     telemetry.altitude = baroData.altitudeM;
 
-    // Orientation
+    // Orientation data
     telemetry.roll = angle.roll;
     telemetry.pitch = angle.pitch;
     telemetry.yaw = angle.yaw;
 
     // Transmit telemetry
     if (!sendTelemetry(telemetry)) {
-        Serial.println("[ESP-NOW] Send request failed");
+        Serial.println("[ESP-NOW] Telemetry send request failed");
     }
 
     delay(1);

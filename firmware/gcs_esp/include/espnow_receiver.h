@@ -1,8 +1,8 @@
-#ifndef ESPNOW_RECEIVER_H
-#define ESPNOW_RECEIVER_H
+
+#pragma once
+
+#include <Arduino.h>
 
 bool initReceiver();
-bool sendLedTestStart();
-bool sendLedTestAbort();
-
-#endif
+bool sendRocketCommand(uint8_t command);
+void processGCSInput();
