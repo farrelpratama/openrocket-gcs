@@ -11,6 +11,8 @@
 
 #include "telemetry.h"
 #include "espnow_transmitter.h"
+#include "command_receiver.h"
+#include <WiFi.h>
 
 // GCS ESP32 MAC address
 const uint8_t receiverMAC[] = {
@@ -82,12 +84,21 @@ void setup() {
         while (true) delay(100);
     }
 
+    Serial.printf("[INFO] Rocket ESP32 MAC: %s\n", WiFi.macAddress().c_str());
+
+    if (!initCommandReceiver()) {
+        Serial.println("[ERROR] Command receiver initialization failed");
+        while (true) delay(100);
+    }
+
     previousTime = micros();
 
     Serial.println("=== ROCKET SYSTEM READY ===");
 }
 
 void loop() {
+    processCommandReceiver();
+
     SensorData imuData;
     BarometerData baroData;
 
