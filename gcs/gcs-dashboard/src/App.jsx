@@ -25,70 +25,44 @@ import {
   Compass,
 } from "lucide-react";
 
+import React from "react";
+import Header from "./components/layout/Header";
+import DashboardLayout from "./components/layout/DashboardLayout";
+import TelemetrySource from "./components/telemetry/TelemetrySource";
+import TelemetryCards from "./components/telemetry/TelemetryCards";
+import AttitudeChart from "./components/telemetry/AttitudeChart";
+import AltitudeChart from "./components/telemetry/AltitudeChart";
+import OrientationView from "./components/telemetry/OrientationView";
+import EventLog from "./components/mission/EventLog";
+import SystemStatus from "./components/safety/SystemStatus";
+import { useTelemetry } from "./features/telemetry/useTelemetry";
+import { createEmptyTelemetry } from "./types/telemetry";
+import { useEventLog } from "./features/mission/UseEventLog";
+
 export default function App() {
-  const [mode, setMode] = useState("LIVE"); // "LIVE" | "REPLAY"
-  const [isRunning, setIsRunning] = useState(false);
-  const [armed, setArmed] = useState(false);
-  const [confirmArm, setConfirmArm] = useState(false);
-  const [confirmPop, setConfirmPop] = useState(false);
-  const [ejectionTriggered, setEjectionTriggered] = useState(false);
+  const { eventLog, addLog } = useEventLog();
+  const telemetry = useTelemetry({ addLog });
+  const latest = telemetry.latest ?? createEmptyTelemetry();
 
-  const [telemetryHistory, setTelemetryHistory] = useState([]);
-  const [replayData, setReplayData] = useState([]);
-  const [replayIndex, setReplayIndex] = useState(0);
-  const [serialPort, setSerialPort] = useState(null);
+  const sourceLabel =
+    telemetry.mode === "SIMULATION" ? "SIMULATION" : "CSV REPLAY";
 
-  const [eventLog, setEventLog] = useState([
-    `[${new Date().toLocaleTimeString()}] GMA GCS Frontend Initialized.`,
-  ]);
-
-  const startTimeRef = useRef(null);
-
-  const addLog = (message) => {
-    const timeStr = new Date().toLocaleTimeString();
-    setEventLog((prev) => [`[${timeStr}] ${message}`, ...prev.slice(0, 49)]);
-  };
-
-  // ==========================================
-  // HARDWARE WEBSERIAL API CONNECTION
-  // ==========================================
-  const connectSerial = async () => {
-    try {
-      if (!navigator.serial) {
-        alert("Web Serial API tidak didukung di browser ini. Gunakan Google Chrome atau Microsoft Edge.");
-        return;
+  return (
+    <DashboardLayout
+      header={
+        <Header
+          connectionStatus={sourceLabel}
+          latest={telemetry.latest}
+        />
       }
-      const port = await navigator.serial.requestPort();
-      await port.open({ baudRate: 115200 });
-      setSerialPort(port);
-      addLog("SUCCESS: ESP32 GCS Connected via USB Serial.");
-
-      const textDecoder = new TextDecoderStream();
-      port.readable.pipeTo(textDecoder.writable);
-      const reader = textDecoder.readable.getReader();
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        if (value) {
-          const lines = value.split("\n");
-          lines.forEach((line) => {
-            const cols = line.trim().split(",");
-            if (cols.length >= 6) {
-              const newDataPoint = {
-                time: parseFloat(cols[0]) || 0,
-                yaw: parseFloat(cols[1]) || 0,
-                pitch: parseFloat(cols[2]) || 0,
-                roll: parseFloat(cols[3]) || 0,
-                altitude: parseFloat(cols[4]) || 0,
-                voltage: parseFloat(cols[5]) || 11.0,
-                rssi: -60,
-                status: "LIVE HARDWARE",
-              };
-              setTelemetryHistory((prev) => [...prev.slice(-99), newDataPoint]);
-            }
-          });
-        }
+      sidebar={
+        <>
+          <TelemetrySource telemetry={telemetry} addLog={addLog} />
+          <SystemStatus
+            mode={telemetry.mode}
+            isRunning={telemetry.isRunning}
+          />
+        </>
       }
     } catch (error) {
       addLog(`SERIAL ERROR: ${error.message}`);
@@ -580,30 +554,10 @@ export default function App() {
               </div>
             </div>
 
-            <div className="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col">
-              <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                <Terminal className="w-4 h-4 text-emerald-400" /> Mission Event Log
-              </h3>
-              <div className="flex-1 bg-slate-950 border border-slate-800 rounded-lg p-3 font-mono text-xs text-slate-300 overflow-y-auto h-48 space-y-1">
-                {eventLog.map((entry, idx) => (
-                  <div
-                    key={idx}
-                    className={
-                      entry.includes("CRITICAL") || entry.includes("ERROR")
-                        ? "text-red-400 font-bold"
-                        : entry.includes("ARMED")
-                        ? "text-amber-400"
-                        : "text-slate-300"
-                    }
-                  >
-                    {entry}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+        <OrientationView latest={latest} />
+        <EventLog entries={eventLog} />
       </div>
-    </div>
+    </DashboardLayout>
   );
 }

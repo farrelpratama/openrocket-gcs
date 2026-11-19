@@ -60,6 +60,7 @@ bool initTransmitter(const uint8_t* receiverMAC) {
     return true;
 }
 
+
 bool sendTelemetry(const TelemetryPacket& packet) {
     esp_err_t result = esp_now_send(
         peerInfo.peer_addr,
@@ -67,5 +68,16 @@ bool sendTelemetry(const TelemetryPacket& packet) {
         sizeof(TelemetryPacket)
     );
 
-    return result == ESP_OK;
+    if (result != ESP_OK) {
+        Serial.printf(
+            "[ESP-NOW ERROR] Send failed: %s (%d)\n",
+            esp_err_to_name(result),
+            result
+        );
+
+        return false;
+    }
+
+    return true;
 }
+
