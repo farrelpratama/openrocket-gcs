@@ -8,11 +8,18 @@ struct BarometerData {
     float temperatureC;
     float pressurePa;
     float pressureHpa;
+
+    // Raw relative altitude (without filtering)
+    float altitudeRawM;
+
+    // Filtered relative altitude
+    float altitudeFilteredM;
+
+    // Backward compatibility with existing code
     float altitudeM;
 };
 
 class BMP180 {
-
 public:
     BMP180();
 
@@ -20,14 +27,12 @@ public:
 
     bool readSensor(BarometerData& data);
 
-    bool calibrateGroundPressure(
-        uint8_t samples = 20
-    );
+    bool calibrateGroundPressure(uint8_t samples = 100);
 
     float getGroundPressure() const;
 
 private:
-    // BMP180 calibration coefficients
+    // BMP180 factory calibration coefficients
     int16_t AC1;
     int16_t AC2;
     int16_t AC3;
@@ -42,29 +47,26 @@ private:
     int16_t MC;
     int16_t MD;
 
-    // Reference pressure
+    // Ground reference pressure in Pa
     float groundPressure;
+
+    // Altitude filter
+    float filteredAltitude;
+    bool altitudeFilterInitialized;
+
+    // Relative altitude baseline
+    float altitudeOffset;
+    bool altitudeBaselineInitialized;
 
     // Internal calculations
     bool readCalibrationData();
 
-    bool readInt16(
-        uint8_t reg,
-        int16_t& value
-    );
+    bool readInt16(uint8_t reg, int16_t& value);
+    bool readUInt16(uint8_t reg, uint16_t& value);
 
-    bool readUInt16(
-        uint8_t reg,
-        uint16_t& value
-    );
-
-    bool writeRegister(
-        uint8_t reg,
-        uint8_t value
-    );
+    bool writeRegister(uint8_t reg, uint8_t value);
 
     bool readRawTemperature(uint16_t& ut);
-
     bool readRawPressure(uint32_t& up);
 
     bool calculateTemperature(
@@ -79,9 +81,9 @@ private:
         uint32_t& pressure
     );
 
-    float calculateAltitude(
-        float pressurePa
-    ) const;
+    float calculateAltitude(float pressurePa) const;
+
+    void resetAltitudeFilter();
 };
 
 #endif

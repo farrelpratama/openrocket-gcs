@@ -33,10 +33,10 @@
 // 1 = Standard
 // 2 = High Resolution
 // 3 = Ultra High Resolution
-#define BMP180_OVERSAMPLING 1
+#define BMP180_OVERSAMPLING 3
 
 // Ground pressure calibration
-#define BMP180_GROUND_SAMPLES 20
+#define BMP180_GROUND_SAMPLES 100
 
 // ============================================================
 // I2C CONFIGURATION

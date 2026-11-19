@@ -7,7 +7,6 @@
 static constexpr uint16_t COMMAND_MAGIC = 0xC35A;
 static constexpr uint8_t COMMAND_VERSION = 1;
 
-// Only a non-energetic LED test is supported.
 enum CommandType : uint8_t {
     COMMAND_LED_TEST = 1,
     COMMAND_ACK = 2
@@ -20,7 +19,6 @@ enum CommandStatus : uint8_t {
 };
 
 #pragma pack(push, 1)
-
 struct CommandPacket {
     uint16_t magic;
     uint8_t version;
@@ -28,11 +26,12 @@ struct CommandPacket {
     uint32_t commandId;
     uint8_t status;
 };
-
 #pragma pack(pop)
 
-static_assert(sizeof(CommandPacket) == 9,
-              "CommandPacket size mismatch");
+static_assert(
+    sizeof(CommandPacket) == 9,
+    "CommandPacket size mismatch"
+);
 
 inline bool isValidCommand(const CommandPacket& packet) {
     return packet.magic == COMMAND_MAGIC &&
